@@ -1,5 +1,9 @@
 package com.cyclespot;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -51,17 +55,17 @@ public class Main {
             // Stores the station IDs for Manhattan stations
             Set<String> manhattanStationIds = new HashSet<>();
 
+
             // Finds the Manhattan stations
             for (JsonNode station : stations) {
 
+                String stationId = station.get("station_id").asText();
                 double latitude = station.get("lat").asDouble();
                 double longitude = station.get("lon").asDouble();
 
                 // Checks if the station is inside our Manhattan area
                 if (latitude >= 40.70 && latitude <= 40.88
                         && longitude >= -74.02 && longitude <= -73.90) {
-
-                    String stationId = station.get("station_id").asText();
 
                     // Adds the station ID to our set
                     manhattanStationIds.add(stationId);
@@ -103,26 +107,60 @@ public class Main {
                     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
             String formattedTime = dateTime.format(formatter);
 
-            System.out.println("Last updated: " + formattedTime);
             System.out.println();
 
             // Finds the status information for Manhattan stations
-            for (JsonNode station : statusStations) {
 
-                String stationId = station.get("station_id").asText();
+            // Saves Manhattan station measurements to MySQL
+            String sql = "INSERT INTO station_snapshots " +
+                    "(station_id, num_bikes_available, " +
+                    "num_docks_available, last_reported) " +
+                    "VALUES (?, ?, ?, ?)";
 
-                // Checks if this station is in Manhattan
-                if (manhattanStationIds.contains(stationId)) {
+            try (Connection connection =
+                         DatabaseConnection.getConnection();
+                 PreparedStatement statement =
+                         connection.prepareStatement(sql)) {
 
-                    int bikes = station.get("num_bikes_available").asInt();
-                    int docks = station.get("num_docks_available").asInt();
+                // Finds the status information for Manhattan stations
+                for (JsonNode station : statusStations) {
 
-                    System.out.println("Station ID: " + stationId);
-                    System.out.println("Available bikes: " + bikes);
-                    System.out.println("Available docks: " + docks);
-                    System.out.println("-------------------------");
+                    String stationId =
+                            station.get("station_id").asText();
+
+                    // Checks if this station is in Manhattan
+                    if (manhattanStationIds.contains(stationId)) {
+
+                        int bikes =
+                                station.get("num_bikes_available").asInt();
+
+                        int docks =
+                                station.get("num_docks_available").asInt();
+
+                        // Sets the values for the SQL insert
+                        statement.setString(1, stationId);
+                        statement.setInt(2, bikes);
+                        statement.setInt(3, docks);
+                        statement.setLong(4, timestamp);
+
+                        // Adds this station to the batch
+                        statement.addBatch();
+
+                    }
                 }
+
+                // Saves all collected station records to MySQL
+                int[] results = statement.executeBatch();
+
+                System.out.println();
+                System.out.println("Collection completed.");
+                System.out.println("Last updated: " + formattedTime);
+                System.out.println("Manhattan stations identified: "
+                        + manhattanStationIds.size());
+                System.out.println("Station records saved to MySQL: "
+                        + results.length);
             }
+
 
         } catch (Exception e) {
 
